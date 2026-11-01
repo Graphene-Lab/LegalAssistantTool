@@ -3,6 +3,18 @@
 Agent tool for **AIOrchestrator** that answers Italian civil and criminal law questions from a
 **local, verifiable archive** of the codes and of the case law, and produces grounded legal opinions.
 
+> **AI legal assistant for reliable legal opinions and legal consultations.** LegalAssistantTool is an
+> artificial-intelligence tool that answers a legal question or drafts a **legal opinion** only from a
+> **verifiable body of law** — the Italian civil and criminal codes, article by article — **correlated
+> with the case law** that interprets them. Every article and every judgment it cites exists in the
+> local archive, with its exact reference and a link to the official source, so the answer can be
+> checked line by line instead of taken on trust: no invented norms, no invented decisions.
+>
+> It runs as a plugin of **[AgentBridge](https://github.com/Graphene-Lab/AgentBridge/)** — the
+> self-hosted AI assistant that executes agents and their tools in a single process — and therefore
+> also behind its OpenAI-compatible API and its MCP connector, so the same legal research is available
+> from the terminal, from any OpenAI client and from any MCP client.
+
 It exposes exactly two methods to the agent:
 
 | Method | Purpose |
@@ -255,7 +267,7 @@ user asks for a legal opinion (optionally with attachments)
 
 ## 8. Installation
 
-### As an agent plugin (host: AIOffice / AgentBridge)
+### As an agent plugin (host: AIOffice / [AgentBridge](https://github.com/Graphene-Lab/AgentBridge/))
 
 Install `Graphene.LegalAssistantTool` from the host's plugin manager, or drop the
 `LegalAssistantTool-<version>.zip` release into `Tools/LegalAssistantTool/`. The plugin folder carries
@@ -335,6 +347,31 @@ All diagrams are Mermaid and render directly on GitHub.
 * **Only the civil and criminal codes** are indexed (plus the case law that interprets them): other
   sources (TUIR, Codice della strada, DPR 309/90, …) are not in the archive and are not cited.
 * The archive is a *support* for legal analysis: the disclaimer is part of every output.
+
+### 12.1 Other countries and jurisdictions — available on request
+
+Nothing in the engine assumes Italy: retrieval, normalisation, ranking and the anti-hallucination guard
+work on "whatever the local archive contains", and the `jurisdiction` parameter is the gate that refuses
+a request the archive cannot cover. What is Italy-specific today is the **source definition** (the two
+repositories it synchronises), the **Italian text pipeline** and the **thesaurus**, plus the citation
+formats of the national courts. Italy ships first because its codes and case law are published as open
+data that can be synchronised and re-indexed automatically.
+
+**We can extend LegalAssistantTool to any country on request**, with the national sources that matter
+for that jurisdiction (statutes, consolidated codes, constitutional and supreme-court case law), the
+local language pipeline, and the same verifiable-citation contract. The work is a source adapter plus
+a lexicon, not a rewrite:
+
+| Piece | What changes per country |
+|---|---|
+| Source adapter | Download and normalisation of the national repositories or of the official open-data endpoints. |
+| Language pipeline | Folding, tokenisation, stop words and stemming for the local language (FTS5 or Lucene analyser). |
+| Thesaurus | Topics, article numbers and defence points of the national codes. |
+| Citation formats | How a judgment is cited locally, so the citation guard can verify it against the archive. |
+
+Write to the maintainer with the country and the branch of law you need
+([issues](https://github.com/Graphene-Lab/LegalAssistantTool/issues) are fine too) and we will scope the
+adapter and the benchmark set for that jurisdiction.
 
 ## 13. Licence
 
