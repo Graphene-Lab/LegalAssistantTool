@@ -1,0 +1,75 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
+    <!-- Plugin binaries must be OS-neutral: AnyCPU and NO RuntimeIdentifier. -->
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Configurations>Debug;Release;Test</Configurations>
+    <PackageId>Graphene.LegalAssistantTool</PackageId>
+    <Version>$([System.DateTime]::Now.ToString("1.yy.MM.dd"))</Version>
+    <Description>Italian legal research agent tool for AIOrchestrator: retrieves in-force code articles and case law from a locally synchronised archive, and produces a grounded legal opinion with verifiable citations only.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    <PackageRequireLicenseAcceptance>False</PackageRequireLicenseAcceptance>
+    <Copyright>Andrea Bruno</Copyright>
+    <RepositoryUrl>https://github.com/Graphene-Lab/LegalAssistantTool</RepositoryUrl>
+    <PackageTags>agent;tool;legal;law;italy;case-law;llm;retrieval</PackageTags>
+    <DefaultItemExcludes>$(DefaultItemExcludes);LegalAssistantTool.Benchmark\bin\**;LegalAssistantTool.Benchmark\obj\**;LegalAssistantTool.Tests\bin\**;LegalAssistantTool.Tests\obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <!-- Runtime plugin identity: AIOrchestrator.PluginUpdater reads these assembly metadata
+       attributes to know which NuGet package and version a loaded plugin comes from. -->
+  <ItemGroup>
+    <AssemblyMetadata Include="NuGetPackageId" Value="Graphene.LegalAssistantTool" />
+    <AssemblyMetadata Include="NuGetPackageVersion" Value="$(Version)" />
+  </ItemGroup>
+
+  <!-- Dual-reference pattern: the local sibling project wins when present (solution builds);
+       otherwise the NuGet package (1.* floating = always latest) is restored - required for
+       CI/standalone builds where the sibling sources are absent. -->
+  <ItemGroup>
+    <ProjectReference Include="..\AIOrchestrator\AIOrchestrator.csproj" Condition="Exists('..\AIOrchestrator\AIOrchestrator.csproj')" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Graphene.AIOrchestrator" Version="1.*" />
+  </ItemGroup>
+
+  <!-- Retrieval engines: SQLite FTS5 (bundled e_sqlite3 with FTS5 compiled in) and Lucene.Net.
+       Both are OSS, cross-platform and ship as plain managed/native assets. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Lucene.Net" Version="4.8.0-beta00016" />
+    <PackageReference Include="Lucene.Net.Analysis.Common" Version="4.8.0-beta00016" />
+    <PackageReference Include="Lucene.Net.QueryParser" Version="4.8.0-beta00016" />
+    <!-- Attachments: legal filings arrive as PDF or DOCX far more often than as plain text. -->
+    <PackageReference Include="PdfPig" Version="0.1.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="LICENSE.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Update="README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+  <!-- Nested test/benchmark projects must NOT compile into the plugin library. -->
+  <!-- The test and benchmark harnesses drive the internal pipeline directly. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="LegalAssistantTool.Tests" />
+    <InternalsVisibleTo Include="LegalAssistantTool.Benchmark" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="LegalAssistantTool.Tests\**\*.cs" />
+    <Compile Remove="LegalAssistantTool.Benchmark\**\*.cs" />
+  </ItemGroup>
+
+</Project>
