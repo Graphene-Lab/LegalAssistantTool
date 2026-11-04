@@ -3,16 +3,16 @@
 ## 1. Layers
 
 The tool is a plugin assembly with no static dependency on the host: `AIOrchestrator` supplies
-`BaseAgentTool`, `IFileTool`, `Log`, `LLMUtility`, `FileManager` and `SandboxPath`. Everything legal
-lives in the `AIOrchestrator.API.Legal` namespace and is `internal`, so the only surface the agent
-sees is the two public methods.
+`BaseAgentTool`, `IFileTool`, `Log`, `LLMUtility`, `FileManager`, `SandboxPath` and `WebSearchEngine`.
+Everything legal lives in the `AIOrchestrator.API.Legal` namespace and is `internal`, so the only
+surface the agent sees is the three public methods.
 
 ```mermaid
 flowchart TB
     Agent["LLM agent (host: AIOffice / AgentBridge)"]
 
     subgraph Public["Public surface"]
-        Tool["LegalAssistantTool<br/>GetLaws · LegalOpinion"]
+        Tool["LegalAssistantTool<br/>GetLaws · LegalOpinion · GetLegalForms"]
     end
 
     subgraph Orchestration["Orchestration"]
@@ -20,6 +20,7 @@ flowchart TB
         Archive["LegalArchive<br/>sync · nightly · readiness gate"]
         Engine["LegalOpinionEngine<br/>input gate · attachments · drafting"]
         Retriever["LegalRetriever<br/>thesaurus rounds · scoring · floors"]
+        Templates["LegalTemplates<br/>search · convert · rate · cache"]
     end
 
     subgraph Support["Deterministic support"]
@@ -46,11 +47,15 @@ flowchart TB
     Service --> Archive
     Service --> Retriever
     Service --> Engine
+    Service --> Templates
     Engine --> Retriever
     Engine --> Web
     Engine --> Guard
     Engine --> Llm
     Engine --> Md
+    Templates --> Web2["WebSearchEngine<br/>filetype search"]
+    Templates --> Llm
+    Templates --> Storage
     Retriever --> Thesaurus
     Retriever --> Corpus
     Retriever --> Index
@@ -69,8 +74,8 @@ flowchart TB
 
 | Type | File | Responsibility | Key members |
 |---|---|---|---|
-| `LegalAssistantTool` | `LegalAssistantTool.cs` | Agent surface, logging, exception → `Error:` text. | `GetLaws`, `LegalOpinion` |
-| `LegalService` | `Legal/LegalService.cs` | Jurisdiction check, readiness wait, routing to retrieval or opinion. | `Prepare`, `CheckJurisdiction`, `Laws`, `Opinion`, `ReadyWait` |
+| `LegalAssistantTool` | `LegalAssistantTool.cs` | Agent surface, logging, exception → `Error:` text. | `GetLaws`, `LegalOpinion`, `GetLegalForms` |
+| `LegalService` | `Legal/LegalService.cs` | Jurisdiction check, readiness wait, routing to retrieval, opinion or forms. | `Prepare`, `CheckJurisdiction`, `Laws`, `Opinion`, `Forms`, `ReadyWait` |
 | `LegalArchive` | `Legal/LegalArchive.cs` | Commit probe, ZIP download/extract, rebuild decision, nightly loop, readiness gate. | `EnsureReady`, `StartSync`, `SyncNow`, `NextNightlyRun`, `FormatVersion`, `NightlyHour` |
 | `LegalStorage` | `Legal/LegalStorage.cs` | Data-root resolution and every path; `state.json` read/write. | `Root`, `SqlitePath`, `ArticlesJsonl`, `ReadState`, `WriteState` |
 | `LegalNormalizer` | `Legal/LegalNormalizer.cs` | Maps both repositories to `LegalDocument` and writes JSONL. | `NormalizeAll`, `NormalizeArticles`, `NormalizeJudgments` |
@@ -83,6 +88,7 @@ flowchart TB
 | `LegalOpinionEngine` | `Legal/LegalOpinionEngine.cs` | Input gate, attachment budget, research, web enrichment, drafting, report assembly. | `CheckInput`, `Opinion` |
 | `LegalAttachments` | `Legal/LegalAttachments.cs` | Reads attachments through the sandbox (PDF, DOCX, HTML, text). | `Read`, `HtmlToText` |
 | `LegalWebEnrichment` | `Legal/LegalWebEnrichment.cs` | Web search + per-page usefulness rating + source reliability; silently skipped offline. | `Enrich`, `ReliabilityOf` |
+| `LegalTemplates` | `Legal/LegalTemplates.cs` | Blank-form lookup: filetype search, download, Word → Markdown, one judging call per document on its whole text, scope-aware selection, placeholders per role, spell-checked by `SpellCheck`, cache. | `Get`, `CountryDomain`, `CachePath`, `JudgeOne`, `SelectBest`, `Proofread`, `RepairEncoding`, `Envelope` |
 | `LegalLlm` | `Legal/LegalLlm.cs` | Single entry point for model calls: global time budget, JSON parsing, summarisation. | `Ask`, `AskJson`, `Summarize`, `AttachmentBudget`, `Reset` |
 | `LegalCitationGuard` | `Legal/LegalCitationGuard.cs` | Sentence-level audit against the closed citation list. | `Audit`, `JudgmentKey` |
 | `LegalMarkdown` | `Legal/LegalMarkdown.cs` | Renders `GetLaws`, the 12-section opinion and the insufficient-input document. | `RenderLaws`, `RenderOpinion`, `RenderInsufficientInput` |
@@ -242,6 +248,8 @@ plugin folder — the plugin folder is replaced on update.
 └── index/
     ├── legal.db             # SQLite + FTS5 (the index the tool searches)
     └── lucene-<engine>/     # only when LEGALASSISTANTTOOL_LUCENE=1 (benchmark)
+templates/                   # cached blank forms: document + scope + country
+└── ricorso_in_cassazione.civile_appello_di_milano.it.md
 ```
 
 Total footprint ≈466 MB. There is **no database server and no configuration file**: `legal.db` is a
@@ -262,11 +270,12 @@ single embedded SQLite file created on demand with `SqliteOpenMode.ReadWriteCrea
 
 ## 7. Error philosophy
 
-* The two public methods never throw: every exception becomes `"Error: …"` with the cause and a next
+* The three public methods never throw: every exception becomes `"Error: …"` with the cause and a next
   action (see `LegalAssistantTool`).
 * Optional stages degrade silently: web enrichment (no connection, blocked host, unreadable page) and
   model drafting (no provider, budget exhausted, invalid JSON) log a line and the deterministic path
-  continues.
+  continues. A blank form follows the same rule: a dead link, an unreadable file, an unusable format or
+  no candidate at all ends in a sentence that says so, never in a form written by the model.
 * Required stages fail loudly but politely: no archive after the wait → "still preparing"; empty facts
   → insufficient-input document; non-`IT` jurisdiction → deterministic error.
 

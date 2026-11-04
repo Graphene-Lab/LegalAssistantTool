@@ -21,8 +21,9 @@ everything else is negotiable.
    document is in the archive. The model is given a *closed* list of citations and
    `LegalCitationGuard` deletes any sentence that cites something outside it.
 2. **Deterministic floor.** With no model available (offline, budget exhausted, provider error) both
-   methods still return a complete document built from the retrieved texts. The model improves the
-   prose; it never gates the answer.
+   research methods still return a complete document built from the retrieved texts, and a form lookup
+   still returns the converted form. The model improves the prose and picks the best form; it never
+   gates the answer.
 3. **Self-describing failure.** Insufficient input, unsupported jurisdiction, cold archive and offline
    web all produce an explicit, actionable text — never an exception and never a silently empty result.
 

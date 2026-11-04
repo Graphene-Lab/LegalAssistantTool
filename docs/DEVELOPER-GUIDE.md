@@ -19,7 +19,7 @@ Everything you need to build, test, benchmark, package and modify the tool. Read
 
 ```
 LegalAssistantTool\                 (C:\Users\andre\OneDrive\Sorgenti\LegalAssistantTool)
-├─ LegalAssistantTool.cs           the two agent methods: GetLaws, LegalOpinion
+├─ LegalAssistantTool.cs           the three agent methods: GetLaws, LegalOpinion, GetLegalForms
 ├─ LegalAssistantTool.csproj       net10.0, AnyCPU, date version, package metadata
 ├─ Legal\                          the implementation (one concern per file)
 │  ├─ LegalService.cs              jurisdiction + readiness + method entry points
@@ -32,15 +32,16 @@ LegalAssistantTool\                 (C:\Users\andre\OneDrive\Sorgenti\LegalAssis
 │  ├─ LegalThesaurus.cs            topics: triggers, curated articles, defence points
 │  ├─ LegalLexicon.cs              generic-term filter used by the floor
 │  ├─ LegalOpinionEngine.cs        input gate, attachments, draft, gaps, next steps
+│  ├─ LegalTemplates.cs            blank forms: search, Word -> Markdown, rating, cache
 │  ├─ LegalWebEnrichment.cs        optional internet pass with rating and reliability
 │  ├─ LegalCitationGuard.cs        anti-hallucination audit of model prose
-│  ├─ LegalMarkdown.cs             Markdown rendering of both methods
+│  ├─ LegalMarkdown.cs             Markdown rendering of both research methods
 │  ├─ LegalAttachments.cs          txt/md/html/pdf/docx -> plain text
 │  ├─ LegalLlm.cs                  budgeted, failure-tolerant LLM wrapper
 │  ├─ LegalStorage.cs              data root, every path, state read/write
 │  ├─ LegalNative.cs               e_sqlite3 bootstrap from the plugin folder
 │  └─ ItalianText.cs               fold, tokenize, stem, clip, sentences
-├─ LegalAssistantTool.Tests\       end-to-end harness (sync|laws|opinion|verify|all)
+├─ LegalAssistantTool.Tests\       end-to-end harness (sync|laws|opinion|forms|describe|verify|all)
 ├─ LegalAssistantTool.Benchmark\   retrieval benchmark (35 gold queries)
 ├─ docs\                           this documentation
 ├─ README.md                       public documentation and benchmark summary
@@ -90,10 +91,18 @@ dotnet run --project LegalAssistantTool.Tests -- opinion --echo
 | `sync` | `LegalArchive.SyncNow(force: false)`, prints counts and timings | the archive is not ready |
 | `laws` | 7 `GetLaws` calls (furto, rapina, truffa, locazione, lavoro, danno, a nonsense topic) | an answer lacks articles, or the nonsense topic returns content |
 | `opinion` | 5 `LegalOpinion` calls (furto with facts, locazione with an attachment, thin facts, empty facts, no attachment) | an opinion is missing, or a refusal is missing where expected |
+| `forms` | `GetLegalForms` for two real documents plus a nonsense name, and the rating/encoding logic without a model | the envelope, the cache, the placeholders or the "no template" answer is wrong, or a template carries double-encoded text |
+| `describe` | prints the catalogue the host builds from this type — exactly what the model reads | a method is missing from it, or the mandatory-form rule does not reach the model |
 | `verify` | re-reads every `.out\*.md` and checks each `Art. N` and `n. N/YYYY` against the archive | a citation cannot be found in the corpus |
-| `all` | the four above, in order | any of them |
+| `all` | the six above, in order | any of them |
 
 * `--echo` mirrors every `Log.LogStep` line to the console (prefixed `>>` for monitor steps).
+* `LEGALASSISTANTTOOL_TEST_LLM=<provider>` runs the scenarios against a provider from `providers.json`
+  instead of the file's first entry, and `LEGALASSISTANTTOOL_TEST_KEY` supplies its key so no key is
+  ever written into the committed file. `LEGALASSISTANTTOOL_LLM_BUDGET_SECONDS` raises the model time
+  budget for a slow local model (default 240 s).
+* `describe` is the check that matters for the agent surface: only `<summary>`, `<param>` and
+  `<returns>` are rendered — a rule written in `<remarks>` never reaches the model.
 * The data root is pinned to `<project>\.data`, so a harness run never touches the user's real
   archive in `%LOCALAPPDATA%`. Delete that folder to test a cold install.
 * The rendered answers are written to `<project>\.out\*.md`. Read them: they are the product.
@@ -130,6 +139,19 @@ convention) and to `Log.CurrentLogFile`. A healthy `LegalOpinion` call produces 
 
 The most useful single check: **step 15 against the rendered §4/§5**. If the log says 10 articles
 and the Markdown shows fewer, the problem is in `LegalMarkdown`, not in retrieval.
+
+A `GetLegalForms` call reads like this:
+
+| # | Log line (abridged) | What it proves | What to check if it looks wrong |
+|---|---|---|---|
+| 1 | `LegalService.Forms: jurisdiction=IT, document='ricorso in Cassazione', scope='civile, appello di Milano'` | The method was entered with the name and the scope the agent chose | A scope in the wrong field -> the agent misread the case; the form will be judged against it |
+| 2 | `LegalTemplates: cache hit for '...' [civile, appello di Milano] (ricorso_in_cassazione.civile_appello_di_milano.it.md, N chars)` | The form was served from disk | Wanted a fresh lookup -> delete `templates\<document>.<scope>.<cc>.md` |
+| 3 | `LegalTemplates: search filetype=doc returned N result(s).` | The filetype search ran | `0` -> no search provider answered; the `.docx` fallback follows |
+| 4 | `LegalTemplates: <url> coverage 0.83 (N chars).` | Which candidates share the document's vocabulary | All below 0.5 -> the answer is "no template", by design |
+| 5 | `LegalTemplates: <url> requested=True rating=9 (motivo)` | The model's verdict on that one document, from its whole text | `requested=False` on the right act -> the judging prompt or the document name is wrong; the model answered nothing -> the deterministic path ran |
+| 6 | `LegalTemplates: repaired the double encoding of the converted text.` | A binary `.doc` was decoded with the wrong code page | Frequent -> sources in an unusual code page, check `RepairEncoding` |
+| 6-bis | `proofreading N suspect word(s): ...` then `proofreading applied` / `proofreading refused (...)` | The local dictionary listed the words it does not know and the model corrected only the real typos | `refused` -> the correction would have changed placeholders, left Italian, or cut the text: the form is served as it was |
+| 7 | `LegalTemplates: '<name>' served from <url> (N chars, cached as <file>)` | The envelope and the cache were written | Missing -> the call returned the "no template" or offline answer |
 
 ## 6. Recipes
 

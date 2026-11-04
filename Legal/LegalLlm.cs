@@ -36,6 +36,7 @@ internal static class LegalLlm
     private static DateTime _started = DateTime.UtcNow;
     private static readonly object Gate = new();
     private static bool _poisoned;
+    private static int _abandoned;
 
     /// <summary>
     /// Total time the whole opinion may spend talking to the model. A local model can take minutes
@@ -51,13 +52,17 @@ internal static class LegalLlm
         }
     }
 
-    /// <summary>Starts a new time budget. Called at the beginning of every tool call.</summary>
+    /// <summary>
+    /// Starts a new time budget. Called at the beginning of every tool call. A call abandoned by an
+    /// earlier tool call keeps the provider busy until it ends (a local model has one slot), so the new
+    /// budget starts poisoned while one is still running: waiting behind it would only burn the budget.
+    /// </summary>
     public static void Reset()
     {
         lock (Gate)
         {
             _started = DateTime.UtcNow;
-            _poisoned = false;
+            _poisoned = Volatile.Read(ref _abandoned) > 0;
         }
     }
     /// <summary>Seconds left in the budget of this call (never negative).</summary>
@@ -83,19 +88,31 @@ internal static class LegalLlm
         {
             if (Exhausted)
             {
-                Log.LogStep($"LLM call '{label}' skipped: time budget exhausted ({BudgetSeconds}s).");
+                Log.LogStep($"LLM call '{label}' skipped: " + (Volatile.Read(ref _abandoned) > 0
+                    ? "a previous abandoned call still occupies the provider"
+                    : $"time budget exhausted ({BudgetSeconds}s)"));
                 return null;
             }
 
             var wait = Math.Min(timeoutSeconds, RemainingSeconds);
+            var llm = new LLMUtility();
+            var owned = true;
             try
             {
-                using var llm = new LLMUtility();
                 var task = Task.Run(() => llm.SendQuery(prompt, useHistory: false, role: role,
                     maxToken: maxTokens, temperature: temperature));
                 if (!task.Wait(TimeSpan.FromSeconds(wait)))
                 {
-                    // The abandoned call keeps the provider busy: no further call can be trusted.
+                    // The abandoned call keeps the provider busy: no further call can be trusted. It is
+                    // still writing to the wire, so it keeps the utility and disposes it when it ends —
+                    // disposing here would throw ObjectDisposedException inside the orphaned request.
+                    owned = false;
+                    Interlocked.Increment(ref _abandoned);
+                    _ = task.ContinueWith(_ =>
+                    {
+                        llm.Dispose();
+                        Interlocked.Decrement(ref _abandoned);
+                    }, TaskScheduler.Default);
                     _poisoned = true;
                     Log.LogStep($"LLM call '{label}' exceeded {wait}s and was abandoned; using the deterministic answer.");
                     return null;
@@ -117,6 +134,10 @@ internal static class LegalLlm
             {
                 Log.LogStep($"LLM call '{label}' failed: {ex.GetType().Name}: {ex.Message}");
                 return null;
+            }
+            finally
+            {
+                if (owned) llm.Dispose();
             }
         }
     }

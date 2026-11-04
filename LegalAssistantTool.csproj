@@ -19,7 +19,7 @@
     <Copyright>Andrea Bruno</Copyright>
     <RepositoryUrl>https://github.com/Graphene-Lab/LegalAssistantTool</RepositoryUrl>
     <PackageTags>agent;tool;legal;law;italy;case-law;llm;retrieval</PackageTags>
-    <DefaultItemExcludes>$(DefaultItemExcludes);LegalAssistantTool.Benchmark\bin\**;LegalAssistantTool.Benchmark\obj\**;LegalAssistantTool.Tests\bin\**;LegalAssistantTool.Tests\obj\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);LegalAssistantTool.Benchmark\bin\**;LegalAssistantTool.Benchmark\obj\**;LegalAssistantTool.Tests\bin\**;LegalAssistantTool.Tests\obj\**;LegalAssistantTool.Puppet\bin\**;LegalAssistantTool.Puppet\obj\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <!-- Runtime plugin identity: AIOrchestrator.PluginUpdater reads these assembly metadata
@@ -70,6 +70,7 @@
   <ItemGroup>
     <Compile Remove="LegalAssistantTool.Tests\**\*.cs" />
     <Compile Remove="LegalAssistantTool.Benchmark\**\*.cs" />
+    <Compile Remove="LegalAssistantTool.Puppet\**\*.cs" />
   </ItemGroup>
 
 </Project>

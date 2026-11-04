@@ -83,6 +83,22 @@ internal static class LegalService
         return markdown;
     }
 
+    /// <summary>Answers the "forms" method.</summary>
+    /// <param name="jurisdiction">Jurisdiction code.</param>
+    /// <param name="documentName">Document name in the language of the country.</param>
+    /// <param name="scope">Field and court the document is for.</param>
+    /// <returns>The fenced template, or the text explaining why none is available.</returns>
+    public static string Forms(LegalJurisdiction jurisdiction, string documentName, string scope)
+    {
+        Log.LogStep($"LegalService.Forms: jurisdiction={jurisdiction}, document='{ItalianText.Clip(documentName, 80)}', " +
+                    $"scope='{ItalianText.Clip(scope, 80)}'");
+
+        var jurisdictionError = CheckJurisdiction(jurisdiction);
+        if (jurisdictionError != null) return jurisdictionError;
+
+        return LegalTemplates.Get(jurisdiction, documentName ?? string.Empty, scope ?? string.Empty);
+    }
+
     /// <summary>Answers the "opinion" method.</summary>
     /// <param name="jurisdiction">Jurisdiction code.</param>
     /// <param name="caseType">Branch of law.</param>

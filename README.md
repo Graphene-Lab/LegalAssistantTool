@@ -15,12 +15,13 @@ Agent tool for **AIOrchestrator** that answers Italian civil and criminal law qu
 > also behind its OpenAI-compatible API and its MCP connector, so the same legal research is available
 > from the terminal, from any OpenAI client and from any MCP client.
 
-It exposes exactly two methods to the agent:
+It exposes exactly three methods to the agent:
 
 | Method | Purpose |
 |---|---|
 | `GetLaws(jurisdiction, caseType, topic)` | The articles in force **and** the judgments about a topic, restricted to the branch of law requested. |
 | `LegalOpinion(jurisdiction, caseType, facts, attachments?, suggestions?)` | A reasoned legal opinion on a concrete case, grounded on the archive and on a rated web enrichment. |
+| `GetLegalForms(jurisdiction, documentName, scope)` | The blank form of a legal document **in the field and court requested**, normalised with `[PLACEHOLDER]` fields: **mandatory before drafting any document for legal use**. |
 
 Everything the tool returns is quoted from the archive: **an article number or a judgment number that
 cannot be found in the archive is never returned** (see [Anti-hallucination](#anti-hallucination)).
@@ -232,7 +233,7 @@ model degrades the prose, never the citations.
 
 ## 7. Output format
 
-Both methods return Markdown:
+All three methods return Markdown:
 
 * `GetLaws` — topic and branch, then **Articoli di legge in vigore** (verbatim text, in-force status,
   Normattiva link) and **Sentenze e provvedimenti** (exact citation, court, date, massima, link to the
@@ -241,16 +242,60 @@ Both methods return Markdown:
   applicable norms, case law, winning strategy, risks, external sources evaluated, missing data,
   recommended actions, attachments examined, citation control. When the input is insufficient:
   *Esito deterministico*, *Informazioni mancanti*, *Come completare la richiesta*.
+* `GetLegalForms` — a fenced `template` block holding the blank form, with every field to fill in
+  written as an uppercase placeholder (`[NOME_COGNOME]`, `[CITTÀ]`, `[IMPORTO]`). When no form exists
+  it says so; when the connection is down it says that the function is unavailable.
+
+### The form of a legal document
+
+`GetLegalForms` is the entry point for anything that will become a `create_document` call: the XML
+`<summary>` — the only field the host turns into the tool description, together with `<param>` and
+`<returns>` — makes it **mandatory before creating any document for legal use**, so the agent drafts on
+a form instead of inventing a layout.
+
+```
+documentName in the language of the country ("ricorso in Cassazione")
+scope        the field and the court it is for ("civile, appello di Milano")
+  -> search 1: "<documentName> modello"      -> up to 10 candidates
+  -> every candidate converted to Markdown    -> the ones that share the document's vocabulary are kept
+  -> the model judges each one on its OWN full text, one call per document
+       isRequested = is this exactly the act asked for, in THIS scope? (controricorso != ricorso,
+                     a penale or penitenziario form is not a civile one)
+       rating      = how complete is it as a blank form? (only ranks the requested ones)
+  -> nothing usable? search 2 WITH the scope, and judge the new candidates
+       (a niche field can hide the right form behind generic results; the scope in the query
+        alone would tilt the choice, so it is only the fallback)
+  -> still nothing: search "<documentName> come fare" (per-language phrase), read the guides,
+       ask the model whether they are reliable and to write the form from them
+       (invented forms are never used: a guide judged unreliable ends in "no template")
+  -> normalisation: typos, structure, placeholders per role and per fact
+       ([NOME_COGNOME_DIFENSORE] is not [NOME_COGNOME_RICORRENTE], [DATA_SENTENZA] is not [DATA_NOTIFICA])
+  -> spell check: the local Hunspell dictionary lists the words it does not know and the model
+       decides which are real typos (sigle, names and latinisms are left alone)
+  -> <data root>/templates/ricorso_in_cassazione.civile_appello_di_milano.it.md
+       (cache: the scope is part of the file name, so two scopes never share a form)
+```
+
+The jurisdiction is converted to the IANA country-code top-level domain of the country (`IT` → `.it`,
+the ISO 3166-1 alpha-2 base every ccTLD is assigned from), so the cache file is named after the
+document, its scope and the country. A run is best-effort by design: no candidate, no connection or no
+model each ends in a stated answer, never in an invented form.
+
+**Choose a model that writes good Italian.** The form's wording is rewritten by the model: a model with
+a weak command of the language leaves typos (`codice fiscal`, `Vogila`) that the spell check can point
+at but not fix by itself.
 
 ### From opinion to a Word document
 
-The Markdown is the payload an agent consumes, not the deliverable. The two methods carry
-`<remarks>` that tell the model how to use them:
+The Markdown is the payload an agent consumes, not the deliverable. The tool descriptions tell the
+model how to use each method — a `<remarks>` block would not: the host renders only `<summary>`,
+`<param>` and `<returns>`, so every rule lives in one of those three.
 
-| Method | What the remarks say |
+| Method | What the description says |
 |---|---|
-| `LegalOpinion` | The answer **must** be turned into a formal "Legal Opinion" document: pass this Markdown to `create_document` and return the DOCX to the user. |
+| `LegalOpinion` | The answer is a formal document: pass this Markdown to `create_document` as "Legal Opinion" and return the DOCX to the user. |
 | `GetLaws` | The answer may stay in the chat; produce a document only when the user asked for one. |
+| `GetLegalForms` | Mandatory before creating any document for legal use: obtain the form, fill its placeholders, then pass the result to `create_document`. |
 
 `create_document` belongs to **OfficeSupportTool**, which ships the `Legal Opinion` template
 (`assets/templates/legal-opinion.html`, a ten-section letterhead layout: parties, object, facts,
@@ -313,7 +358,7 @@ Console.WriteLine(tool.LegalOpinion(LegalJurisdiction.IT, CaseType.Civil,
 ## 11. Tests and harness
 
 ```bash
-# end-to-end harness (sync, retrieval, opinions, citation audit)
+# end-to-end harness (sync, retrieval, opinions, forms, citation audit)
 dotnet run --project LegalAssistantTool.Tests -c Debug -- all
 
 # retrieval benchmark
@@ -321,9 +366,22 @@ dotnet run --project LegalAssistantTool.Benchmark -c Debug -- benchmark-results.
 ```
 
 The harness writes the produced Markdown to `.out/` and checks it: every `Art. N c.p./c.c.` and every
-`n. N/YYYY` must exist in the archive, and the number of links must be non-zero. Strategic points of
-the pipeline log through `AIOrchestrator.Log.LogStep`, so a run can be inspected step by step in
-`logs/<pid>.txt`.
+`n. N/YYYY` must exist in the archive, and the number of links must be non-zero. The `forms` scenario
+searches and downloads real Word forms for "ricorso in Cassazione" and "atto notarile", asserts that
+the envelope, the cache and the placeholders are intact, that a nonsense document name returns the
+"no template" answer, and that the template contains no double-encoded text; it also checks the
+rating → choice logic and the encoding repair without touching the network. The `describe` scenario
+prints the tool catalogue the host builds — the exact text the model reads — and fails when a method
+or the mandatory-form rule is missing from it. Strategic points of the pipeline log through
+`AIOrchestrator.Log.LogStep`, so a run can be inspected step by step in `logs/<pid>.txt`.
+
+A scenario can be pointed at any provider of `providers.json` without editing the file:
+
+```bash
+LEGALASSISTANTTOOL_TEST_LLM=Ornith LEGALASSISTANTTOOL_TEST_KEY=... \
+LEGALASSISTANTTOOL_LLM_BUDGET_SECONDS=900 \
+  dotnet run --project LegalAssistantTool.Tests -- forms --echo
+```
 
 ### 11.1 Developer documentation
 

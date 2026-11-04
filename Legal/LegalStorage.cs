@@ -33,6 +33,9 @@ internal static class LegalStorage
     /// <summary>Folder holding the search indexes.</summary>
     public static string IndexDirectory => Path.Combine(Root, "index");
 
+    /// <summary>Folder holding the cached blank forms, one Markdown file per document and jurisdiction.</summary>
+    public static string TemplatesDirectory => Path.Combine(Root, "templates");
+
     /// <summary>File recording the last synchronisation and the index state.</summary>
     public static string StatePath => Path.Combine(Root, "state.json");
 
@@ -57,6 +60,7 @@ internal static class LegalStorage
         Directory.CreateDirectory(RawDirectory);
         Directory.CreateDirectory(NormalizedDirectory);
         Directory.CreateDirectory(IndexDirectory);
+        Directory.CreateDirectory(TemplatesDirectory);
     }
 
     /// <summary>Reads the persisted state, or a fresh one when the file is missing or unreadable.</summary>

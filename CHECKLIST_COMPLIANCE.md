@@ -1,9 +1,11 @@
 # LegalAssistantTool — TOOL_CHECKLIST Compliance
 
 Checked 2026-11-01 against `AIOrchestrator/API/TOOL_CHECKLIST.md` (current version incl. the
-"Completion — compliance file" point). `LegalAssistantTool` is an offline legal-research agent
-tool: it serves `get_laws` and `legal_opinion`, reads the case documents the agent attaches, and
-keeps its archive, corpus and indexes under the user's local app-data folder.
+"Completion — compliance file" point), extended on 2026-11-04 with `GetLegalForms`.
+`LegalAssistantTool` is an offline legal-research agent tool: it serves `get_laws`, `legal_opinion` and
+`get_legal_forms`, reads the case documents the agent attaches, downloads the blank form of a document
+once and caches it, and keeps its archive, corpus, indexes and templates under the user's local
+app-data folder.
 
 ## Release & layout (plugin tools)
 
@@ -18,12 +20,13 @@ keeps its archive, corpus and indexes under the user's local app-data folder.
 ## Agent-facing descriptions
 
 - OK — descriptions never mention internals: no repository sync, no ZIP download, no FTS5/Lucene/BM25, no prompt pipeline, no summarisation, no model, no nightly scheduler, no cache or index format.
-- OK — minimal: two methods, `<summary>` one sentence each, one `<param>` line per parameter, one `<returns>` line; the class `<remarks>` carries only the cross-method rules.
-- OK — methods state the outcome (articles in force and judgments on a topic; a reasoned opinion), never how it is obtained.
+- OK — minimal: three methods, `<summary>` one sentence each, one `<param>` line per parameter, one `<returns>` line; the cross-method rules are extra lines of the class `<summary>`, because the host renders only `<summary>`, `<param>` and `<returns>` — a `<remarks>` block never reaches the model.
+- OK — methods state the outcome (articles in force and judgments on a topic; a reasoned opinion; the blank form of a document with its fields to fill in), never how it is obtained.
 - OK — nothing tells the agent it is in a sandbox or that paths are virtual; attachments are described as "workspace-relative paths".
 - OK — `attachments` is the only path-bearing parameter and is documented as workspace-relative; no absolute or host path is ever emitted in the Markdown result (the "Fonti e verificabilità" block carries public source URLs only).
 - OK — every public method has `<summary>`, `<param>` for each parameter and `<returns>` covering both the normal result and the `Error:` form.
-- OK — class summary is one line (competency) plus cross-method rules (Italy only; cite only what the tool returns; which method to use for what), and does not explain the methods.
+- OK — class summary is one line (competency) plus cross-method rules (Italy only; cite only what the tool returns; which method to use for what, including the mandatory `get_legal_forms` before any document for legal use), and does not explain the methods.
+- OK — the rendered catalogue is checked by the harness (`describe` scenario): it prints what the agent reads and fails when a method or the mandatory-form rule disappears from it.
 - OK — no redundancy: parameter formats (ISO 3166-1 alpha-2 code, PDF/DOCX/HTML/text, Italian legal terms) live only in `<param>`; the outcome shape lives only in `<returns>`.
 - OK — one instruction per line; every `///` line is one continuous source line.
 - OK — formats specified: `jurisdiction` as a two-letter ISO 3166-1 alpha-2 code with the only accepted value (`IT`), `caseType` as the `Civil`/`Criminal` enum, attachment formats, topic in Italian legal terms, the insufficient-input answer.
@@ -36,23 +39,28 @@ keeps its archive, corpus and indexes under the user's local app-data folder.
 
 ## Surface & sandbox
 
-- OK — only the two agent operations are public on the tool class; the whole engine (`LegalService`, `LegalArchive`, `LegalRetriever`, `LegalIndex`, `LegalLucene`, `LegalOpinionEngine`, `LegalStorage`, …) is `internal`.
+- OK — only the three agent operations are public on the tool class; the whole engine (`LegalService`, `LegalArchive`, `LegalRetriever`, `LegalIndex`, `LegalLucene`, `LegalOpinionEngine`, `LegalTemplates`, `LegalStorage`, …) is `internal`.
 - OK — attachments are resolved with `SandboxPath.TryResolve`; a path outside the workspace is not read and becomes a note in the result ("percorso fuori dal workspace: allegato ignorato") instead of an error. No host path is echoed back.
 - OK — no public method exposes credentials, configuration or host paths; the data root, the model endpoint and the LLM budget are internal settings, never returned.
 
 ## Code & conventions
 
 - OK — class name ends with `Tool`; package id `Graphene.LegalAssistantTool`.
-- OK — `GetLaws` and `LegalOpinion` are declared directly on `LegalAssistantTool`; the only inherited public member is `BaseAgentTool.LoadSkill` (no skills shipped, so not overridden).
-- OK — `Log.LogStep()` at entry, outcome and failure of both public methods, plus the strategic steps of the pipeline (sync, normalisation, index build, retrieval rounds, rating, citation audit) for the test log review.
+- OK — `GetLaws`, `LegalOpinion` and `GetLegalForms` are declared directly on `LegalAssistantTool`; the only inherited public member is `BaseAgentTool.LoadSkill` (no skills shipped, so not overridden).
+- OK — `Log.LogStep()` at entry, outcome and failure of all three public methods, plus the strategic steps of the pipeline (sync, normalisation, index build, retrieval rounds, rating, citation audit, form search, candidate coverage, per-document model verdict, cache write) for the test log review.
+- OK — the form rating runs **one call per document on its whole text**, so nothing accumulates in the context window; the model's verdict separates identity (`isRequested`) from completeness (`rating`) and no numeric threshold is applied — the rating only ranks, and a document is discarded only when the model says it is not the requested act in the requested scope.
+- OK — `scope` is a required parameter and part of the cache key (`<document>.<scope>.<cc>.md`), so a form is never reused across fields of law; the judging prompt rejects an act of another field or court (a penitenziario form is not returned for a civile request).
+- OK — the placeholders are per role and per fact (`[NOME_COGNOME_DIFENSORE]` ≠ `[NOME_COGNOME_RICORRENTE]`, `[DATA_SENTENZA]` ≠ `[DATA_NOTIFICA]`), so filling one never writes the wrong person or date.
+- OK — typos are checked with the local Hunspell dictionary (`SpellCheck`, LibreOffice on Windows, `/usr/share/hunspell` on Linux, `SPELLCHECK_DICTIONARY` to override): only the unknown words are offered to the model as suspicions, and a correction is rejected when it changes placeholders, leaves Italian or cuts the text. No dictionary -> the check is skipped, never a failure.
 - OK — derives from `BaseAgentTool` and implements `IFileTool` (it reads the attached case documents).
-- OK — `[ToolPurpose(ToolPurpose.Other)]`: no other tool performs legal research, so the purpose is declared and the overlap rule is satisfied.
+- OK — `[ToolPurpose(ToolPurpose.Legal)]`: the legal area was added to the taxonomy (`API/ToolPurpose.cs`, `Legal = 1 << 15`) and documented in `AGENT_TOOLS_GUIDE.md`, so no other tool declares it and the overlap check flags any future legal tool instead of hiding behind `Other`.
 - OK — `GenerateDocumentationFile=True`: tool definitions are read from `LegalAssistantTool.xml` shipped next to the dll (also inside the nupkg `lib/net10.0/`).
 
 ## Standardized support — shared AIOrchestrator helpers
 
 - N/A — the tool never describes or previews a file's content to the agent: attachments are read to build the opinion and reported only as legal content (name, how the text was obtained, whether it was summarised), so `FileManager.GetFileInfo`/`GetFilesInfo` would add host metadata the opinion does not need.
-- N/A — the tool creates and modifies no file, so `GitSupport.Snapshot` does not apply; the archive is a private cache under app-data, not a user document, and rollback stays in `GitTool`.
+- N/A — the tool creates and modifies no file, so `GitSupport.Snapshot` does not apply; the archive and the cached forms are private data under app-data, not user documents, and rollback stays in `GitTool`.
+- OK — the form lookup uses the host search helper (`WebSearchEngine.Search` with `filetype:doc`, `.docx` as fallback), states the missing connection instead of failing, and serves every later request from `templates/<slug>.<cc>.md`; no document is ever invented when the search, the download or the model is unavailable.
 - N/A — no file is created or modified, so there is no sandbox-relative path to return.
 - OK — model output is cleaned with `Utility.RemoveFencesEncapsulationAndFixTrim(ref text)` in `LegalLlm.Ask` before any parsing (JSON extraction and the opinion draft).
 - N/A — the tool emits Markdown, never HTML/SVG: `Utility.EmbedSvgIcons` not applicable.
