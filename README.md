@@ -352,8 +352,10 @@ Console.WriteLine(tool.LegalOpinion(LegalJurisdiction.IT, CaseType.Civil,
 * `AssemblyMetadata` `NuGetPackageId` / `NuGetPackageVersion` let `AIOrchestrator.PluginUpdater`
   know which package and version a loaded plugin comes from.
 * Publishing is an explicit act: push a `v*` tag → `.github/workflows/plugin-release.yml` builds the
-  self-contained plugin ZIP, `.github/workflows/publish.yml` packs and pushes the NuGet package using
-  the `NUGET_API_KEY` repository secret (same secret as the other Graphene-Lab repositories).
+  self-contained plugin ZIP, `.github/workflows/publish.yml` packs and pushes the NuGet package with
+  trusted publishing (`NuGet/login@v1` plus `permissions: id-token: write`). There is no secret to
+  set: the credential is minted per run and expires in minutes, so nothing can go stale. nuget.org
+  must hold a trusted publishing policy naming this repository and `publish.yml`.
 
 ## 11. Tests and harness
 
