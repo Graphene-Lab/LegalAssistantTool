@@ -281,7 +281,7 @@ single embedded SQLite file created on demand with `SqliteOpenMode.ReadWriteCrea
 
 ## 8. Plugin loading
 
-`ToolPluginHost` (`AIOrchestrator/ToolPluginHost.cs`) resolves only **managed** assemblies from
+`McpToolHost` (`AIOrchestrator/McpToolHost.cs`) resolves only **managed** assemblies from
 `Tools\<Plugin>\` through `AssemblyLoadContext.Default.Resolving`, and host assemblies win. That is why
 `LegalNative.EnsureSqlite()` loads the bundled native `e_sqlite3.dll` by absolute path from the plugin
 folder instead of relying on the default native probe, and why the plugin folder ships its own
